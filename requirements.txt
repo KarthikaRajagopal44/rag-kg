@@ -9,3 +9,6 @@ neo4j
 pytest
 langchain-community
 pypdf
+sentencepiece>=0.1.99
+PyMuPDF
+
