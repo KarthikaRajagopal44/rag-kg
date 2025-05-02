@@ -1,0 +1,11 @@
+streamlit
+pdfplumber
+sentence-transformers
+faiss-cpu
+transformers
+torch
+langchain
+neo4j
+pytest
+langchain-community
+pypdf
