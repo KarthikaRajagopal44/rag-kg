@@ -2,6 +2,7 @@ Setup Instructions
 1. Clone the Repository
 
 git clone https://github.com/KarthikaRajagopal44/rag-kg.git
+
 cd rag-kg
 
 2. Create a Virtual Environment
