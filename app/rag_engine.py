@@ -1,98 +1,81 @@
-# app/rag_engine.py
-
-import spacy
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-from transformers import pipeline, T5Tokenizer, T5ForConditionalGeneration
-from sentence_transformers import SentenceTransformer
 import torch
+from nltk.tokenize import sent_tokenize
+from sentence_transformers import SentenceTransformer, util
+from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 
 
 class RAGEngine:
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Device set to use {self.device}")
+        print(f"[INFO] Using device: {self.device}")
 
         # Embedding model
-        self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+        self.embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device=str(self.device))
 
-        # Generator model setup
-        self.tokenizer = T5Tokenizer.from_pretrained("t5-small")
-        self.model = T5ForConditionalGeneration.from_pretrained("t5-small").to(self.device)
+        # Generator model using Hugging Face pipeline with Falcon-7B-Instruct
+        model_name = "tiiuae/falcon-7b-instruct"
+        print(f"[INFO] Loading model: {model_name}")
+        self.generator = pipeline("text-generation", 
+                                  model=AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True).to(self.device),
+                                  tokenizer=AutoTokenizer.from_pretrained(model_name),
+                                  device=0 if torch.cuda.is_available() else -1)
 
-        # Chunking settings
-        self.nlp = spacy.load("en_core_web_sm")
-        self.chunk_size = 150
-        self.chunk_overlap = 30
+        self.chunk_token_limit = 100
+        self.chunk_overlap = 1
         self.document_chunks = []
         self.chunk_embeddings = None
-        self.max_input_length = 512
-        self.max_output_length = 200
 
     def chunk_text(self, text):
-        """
-        Splits input text into overlapping chunks using spaCy tokens.
-        """
-        doc = self.nlp(text)
-        tokens = [token.text for token in doc]
-        chunks = []
+        sentences = sent_tokenize(text)
+        chunks, current_chunk = [], []
 
-        for i in range(0, len(tokens), self.chunk_size - self.chunk_overlap):
-            chunk = " ".join(tokens[i:i + self.chunk_size])
-            chunks.append(chunk)
+        for sentence in sentences:
+            current_chunk.append(sentence)
+            token_count = sum(len(s.split()) for s in current_chunk)
+            if token_count > self.chunk_token_limit:
+                chunks.append(" ".join(current_chunk))
+                current_chunk = current_chunk[-self.chunk_overlap:]  # Retain overlap
+
+        if current_chunk:
+            chunks.append(" ".join(current_chunk))
 
         self.document_chunks = chunks
         return chunks
 
     def build_index(self, chunks):
-        """
-        Builds an embedding index for the text chunks.
-        """
-        self.chunk_embeddings = self.embedding_model.encode(chunks, convert_to_tensor=True)
+        print("[INFO] Encoding document chunks...")
+        self.chunk_embeddings = self.embedding_model.encode(
+            chunks, convert_to_tensor=True, normalize_embeddings=True
+        )
         self.document_chunks = chunks
 
     def retrieve_relevant_chunks(self, query, top_k=3):
-        """
-        Returns the top-k relevant chunks using cosine similarity.
-        """
         if self.chunk_embeddings is None:
-            raise ValueError("Index has not been built. Call build_index() first.")
+            raise ValueError("Index not built. Run build_index() after chunking.")
 
-        query_embedding = self.embedding_model.encode([query], convert_to_tensor=True)
-        similarities = cosine_similarity(query_embedding, self.chunk_embeddings)[0]
-        top_indices = np.argsort(similarities)[::-1][:top_k]
+        formatted_query = f"query: {query}"
+        query_embedding = self.embedding_model.encode(
+            formatted_query, convert_to_tensor=True, normalize_embeddings=True
+        )
+        scores = util.cos_sim(query_embedding, self.chunk_embeddings)[0]
+        top_indices = torch.topk(scores, k=top_k).indices
         return [self.document_chunks[i] for i in top_indices]
 
     def generate_answer(self, query, context):
-        """
-        Generates an answer using the T5 model from query and context.
-        """
-        prompt = f"question: {query} context: {context}"
+        prompt = f"""You are a knowledgeable assistant. Answer concisely based only on the context below.
 
-        # Tokenize with truncation to avoid exceeding max length
-        input_ids = self.tokenizer.encode(
-            prompt,
-            return_tensors="pt",
-            truncation=True,
-            max_length=self.max_input_length,
-            padding="max_length"
-        ).to(self.device)
+Context:
+{context}
 
-        with torch.no_grad():
-            outputs = self.model.generate(
-                input_ids=input_ids,
-                max_length=self.max_output_length,
-                num_beams=4,
-                early_stopping=True
-            )
-        answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return answer.strip()
+Question: {query}
+Answer:"""
+
+        outputs = self.generator(prompt, max_new_tokens=256, do_sample=False, num_beams=4)
+        return outputs[0]['generated_text'].split("Answer:")[-1].strip()
 
     def query(self, query):
-        """
-        Takes user query, retrieves relevant chunks, generates answer.
-        """
         top_chunks = self.retrieve_relevant_chunks(query)
         context = " ".join(top_chunks)
         answer = self.generate_answer(query, context)
         return answer, top_chunks
+
