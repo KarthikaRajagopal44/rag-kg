@@ -12,3 +12,4 @@ pypdf
 sentencepiece>=0.1.99
 PyMuPDF
 spacy
+nltk
