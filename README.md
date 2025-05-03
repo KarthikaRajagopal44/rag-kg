@@ -7,7 +7,7 @@ cd rag-kg
 
 2. Create a Virtual Environment
 
-python3.10 -m venv venv
+python3 -m venv venv
 
 source venv/bin/activate
 
