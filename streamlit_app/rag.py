@@ -1,5 +1,9 @@
 import sys
 from pathlib import Path
+import os
+import streamlit as st
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from app.rag_engine import RAGEngine  
 from patch_streamlit import patch_streamlit_file_watcher
 patch_streamlit_file_watcher()
 
@@ -27,27 +31,36 @@ st.set_page_config(page_title="AeroCraft ACE-900 RAG", layout="wide")
 st.title("AeroCraft ACE-900 - Knowledge Assistant")
 st.markdown("Ask any question based on the operations manual PDF.")
 
-@st.cache_data
+# @st.cache_data
+# def setup_rag_engine():
+#     documents = load_pdf(PDF_PATH)
+#     full_text = "\n".join([doc.page_content for doc in documents])
+#     engine = RAGEngine()
+#     chunks = engine.chunk_text(full_text)
+#     engine.build_index(chunks)
+#     return engine
+@st.cache_resource
 def setup_rag_engine():
-    documents = load_pdf(PDF_PATH)
-    full_text = "\n".join([doc.page_content for doc in documents])
-    engine = RAGEngine()
-    chunks = engine.chunk_text(full_text)
-    engine.build_index(chunks)
-    return engine
+    pdf_path = os.path.join(os.getcwd(), "/workspaces/rag-kg/data/Manual example - AeroCraft ACE-900.pdf")
+    return RAGEngine(pdf_path)
 
 # Load and initialize RAG engine
 rag_engine = setup_rag_engine()
 
 # User input
 query = st.text_input("🔍 Ask a question:")
+# if query:
+#     answer = rag_engine.query(query)
+    
+#     st.subheader("Most Relevant Text Chunks:")
+#     for i, chunk in enumerate(top_chunks):
+#         st.markdown(f"**Chunk {i+1}:**")
+#         st.write(chunk)
+    
+#     st.subheader("Answer:")
+#     st.success(answer)
 if query:
-    answer, top_chunks = rag_engine.query(query)
-    
-    st.subheader("Most Relevant Text Chunks:")
-    for i, chunk in enumerate(top_chunks):
-        st.markdown(f"**Chunk {i+1}:**")
-        st.write(chunk)
-    
+    answer = rag_engine.query(query)
+
     st.subheader("Answer:")
     st.success(answer)
